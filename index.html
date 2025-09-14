@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>WebHID Game Controller – Minimal</title>
+<button id="connect_button">接続（WebHID）</button>
+<pre id="log" style="max-height:40vh;overflow:auto;border:1px solid #ccc;padding:.5rem;"></pre>
+<script>
+const log = (...args) => {
+  console.log(...args);
+  const s = args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ");
+  document.getElementById("log").textContent += s + "\n";
+};
+
+if (!("hid" in navigator)) {
+  alert("このブラウザは WebHID をサポートしていません。Chrome/Edge 系でお試しください。");
+}
+
+// HIDデバイスにはレポート記述子というのがあり、それを参照することで接続可能なHIDデバイスを制限している
+// ベンダーで絞ることも可能
+// 参考: https://usb.org/sites/default/files/hut1_6.pdf
+// 参考: https://developer.mozilla.org/ja/docs/Web/API/HID/requestDevice
+const GENERIC_DESKTOP_PAGE = 0x01;
+const GAME_PAD = 0x05;
+const filters = [
+  { usagePage: GENERIC_DESKTOP_PAGE, usage: GAME_PAD },
+];
+
+// Xbox360 for windowsのHID Report Descriptor
+// 参考: https://github.com/nefarius/ViGEmBus/issues/40
+async function connect() {
+  let device;
+  try {
+    // 既に許可済みデバイスがあればそれを使う
+    const already = await navigator.hid.getDevices();
+    device = already.find(d => matchesFilter(d)) || await requestDevice();
+
+    if (!device) return;
+
+    device.addEventListener("inputreport", handleInputReport);
+    navigator.hid.addEventListener("connect", e => log("[connect]", e.device.productName));
+    navigator.hid.addEventListener("disconnect", e => log("[disconnect]", e.device.productName));
+
+    if (!device.opened) await device.open();
+    log("✅ Opened:", device.productName, `vendor=0x${hex(device.vendorId,4)} product=0x${hex(device.productId,4)}`);
+    log("collections:", device.collections.map(c => ({
+      usagePage: `0x${hex(c.usagePage,2)}`, usage: `0x${hex(c.usage,2)}`
+    })));
+  } catch (e) {
+    console.error(e);
+    log("❌ Error:", e.message || e);
+  }
+}
+
+function matchesFilter(d) {
+  return d.collections.some(c =>
+    filters.some(f =>
+      c.usagePage === f.usagePage &&
+      c.usage === f.usage
+    )
+  );
+}
+
+async function requestDevice() {
+  const [picked] = await navigator.hid.requestDevice({ filters });
+  return picked;
+}
+
+function handleInputReport(e) {
+  const bytes = new Uint8Array(e.data.buffer);
+  log(`reportId=${e.reportId} len=${bytes.length} data=${toHex(bytes)}`);
+}
+
+function hex(n, w=2){ return n.toString(16).padStart(w, "0"); }
+function toHex(u8){ return Array.from(u8, b => b.toString(16).padStart(2,"0")).join(" "); }
+
+document.getElementById("connect_button").addEventListener("click", connect);
+</script>
